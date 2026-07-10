@@ -1,91 +1,102 @@
-# Wiki: VLA Models — Temporal Action Quantization
+# Wiki: VLA Temporal-Action-Quantization Research Vault
 
-This is a research deep-dive wiki following the pattern described in [PATTERN.md](PATTERN.md). This file is the schema: it tells you (the LLM) how this specific wiki is organized and how to maintain it. Read it before ingesting a source or answering a query.
+This file is the schema: it tells you (the LLM) how this vault is organized and how to maintain it every session. Read it before touching anything in `raw/`, `wiki/`, or `agents/`.
 
 ## Topic
 
-Vision-Language-Action (VLA) models, with a focus on **temporal action quantization** — how continuous action sequences get discretized into tokens for autoregressive prediction (action tokenizers, codebooks, FSQ/VQ-VAE variants, chunking/horizon choices, and how these choices trade off against diffusion/flow-matching action heads).
+Vision-Language-Action (VLA) models, focused specifically on **temporal action quantization** — the current project is a **Success-Grounded Quantization Signal Router**: a per-chunk module that decides, right before executing an action chunk, whether it's safe to dispatch to a coarse (temporally-compressed) vs. fine decoder, trained on labels grounded in actual mixed-quant rollout success rather than a reconstruction-fit proxy. It extends ATQ (Adaptive Temporal Quantization), the reference paper, rather than reproducing it. See `raw/proposal.md` for the canonical spec and `wiki/en/research-directions.md` for the evolving research direction.
+
+## Session workflow (mandatory, every session)
+
+- **Start of session:** `git pull`.
+- **End of session:** summarize the diff to the user, then `git add -A && git commit -m "..." && git push`.
+- This rule is self-enforcing — run it regardless of what else the session was asked to do.
+- **Commit gate:** the end-of-session commit only happens if `agents/korean-sync.md`'s agent completed this session (ran to completion, including its no-op path — see below). If it crashed, errored, or was skipped, fix or re-run it first; do not commit. A committed diff containing a `## Session Handoff` heading in `wiki/en/research-directions.md` is itself a bug signal that this gate was violated.
 
 ## Directory structure
 
 ```
-raw/                  Immutable source materials. Never edit these.
-  assets/             Downloaded images from clipped articles/papers (see Image handling)
+raw/
+  proposal.md              Immutable. The project's own canonical spec — never duplicated
+                            verbatim into wiki/, only linked to.
+  papers/
+    {slug}/
+      original.pdf          Immutable source, one directory per paper (not a flat {slug}.pdf) so a
+                            second artifact — supplementary PDF, clipped HTML — can be added later
+                            without renaming anything. Mirrors the raw/assets/ precedent.
+  assets/                   Images extracted from clipped web sources.
+
 wiki/
-  index.md            Catalog of every wiki page — read this first when answering a query
-  log.md               Append-only chronological record of ingests/queries/lints
-  sources/            One summary page per ingested source (paper, article, post)
-  entities/            Pages for concrete things: specific models, papers, orgs/labs, datasets, benchmarks
-  concepts/            Pages for ideas/techniques that span multiple sources: e.g. action tokenization,
-                       FSQ vs VQ-VAE, chunking horizon, autoregressive vs diffusion action heads
-  synthesis/           Standing thesis, comparison tables, open questions — the evolving "so what"
-CLAUDE.md              This file — the schema
-PATTERN.md             The generic LLM-wiki idea doc this wiki instantiates (reference only, not maintained)
+  en/                       AI-native brain — written/updated first, every session.
+    index.md                Catalog: papers (ingested/backlog), methods, research directions, links.
+    tags.md                 Tag taxonomy — single source of truth. New tags added here before use.
+    research-directions.md  Append-only dated log + in-place Open Questions + Session Handoff +
+                            durable Sync Log (see Korean twin wiki rules below).
+    glossary.md              Notation glossary (θ, κ, p, D*, m/L, q, ...) — the shared source of
+                            truth for which symbols stay untranslated in wiki/ko/.
+    papers/{slug}.md         Verbatim-preserving transcription. No opinion/commentary — ever.
+    takeaways/{slug}-takeaways.md   Takeaways + pitfalls. Opinion lives here, nowhere else.
+    methods/                 4 fixed files (see Method files below) — no ad hoc additions.
+  ko/                       Human-native brain — 1:1 structural mirror of everything above,
+                            produced in the same session as the en change it mirrors.
+
+agents/                     5 fixed, reusable agent definitions (see Agent roster below).
+CLAUDE.md                   This file.
 ```
 
-## Source formats
+## Raw ingestion & conversion rules
 
-- **Papers**: drop the PDF as-is into `raw/` — no conversion needed, read it directly. Name it `<arxiv-id>-<short-slug>.pdf` (e.g. `2410.12345-fast-tokenizer.pdf`) so it's greppable and traceable back to arXiv.
-- **Articles/blog posts**: clip with Obsidian Web Clipper — lands as markdown in `raw/` with images in `raw/assets/`.
-- Raw sources are never edited or renamed after ingest — treat them as immutable.
+When bringing a new paper/URL into the vault (`agents/data-collector.md`):
 
-## Page conventions
+- Preserve the original text as faithfully as possible in `wiki/en/papers/{slug}.md` — **no summary, no commentary, no opinion**; those go only in `wiki/en/takeaways/{slug}-takeaways.md`.
+- Figures/tables go in-context, at the point in the text where referenced — never batched at the end.
+- Structural diagrams (architecture figures, flowcharts) get reproduced as ASCII/text diagrams.
+- Graph-style images that don't reproduce meaningfully as text get a <=3-line summary of the key point instead.
+- Tables become markdown tables. Formulas are LaTeX (`$...$`, `$$...$$`). Footnotes become a `>` blockquote immediately after the referencing paragraph.
+- Frontmatter tags are drawn from `wiki/en/tags.md`. A genuinely new tag gets added there under a `(pending review)` marker (see Agent roster — `data-collector` cannot synchronously coordinate with `wiki-architect`, which runs last).
 
-- Every wiki page gets YAML frontmatter:
-  ```yaml
-  ---
-  type: source | entity | concept | synthesis
-  title: <human-readable title>
-  date: <YYYY-MM-DD ingested or last updated>
-  tags: [tag1, tag2]
-  sources: [<source page links this draws from>]
-  ---
-  ```
-- File naming: kebab-case, descriptive (`fast-tokenizer.md`, `openvla.md`, `action-chunking.md`).
-- Use `[[wikilink]]`-style relative markdown links (`[FAST](../concepts/fast-tokenizer.md)`) so Obsidian's graph view stays useful.
-- Every source page must link out to at least one concept or entity page, and every concept/entity page should link back to the sources that informed it. Avoid orphan pages — check `index.md` periodically for anything with no inbound links.
-- Keep concept pages synthesis-oriented, not per-source notes: when a new source touches an existing concept, *update* that concept page (add nuance, flag contradictions, revise claims) rather than duplicating it in the source summary.
+## Takeaway/pitfall extraction rules
 
-## Workflows
+`agents/contribution-analyst.md`: each ingested paper gets `wiki/en/takeaways/{slug}-takeaways.md` — Takeaways usable in this project's research (each with a 1-line "why relevant"), and Pitfalls (paper-stated or judged). When takeaways change the research direction or open a new question, append a dated entry to `wiki/en/research-directions.md`'s Dated Log (append-only — never edit a past entry) and update the Open Questions section in place if affected.
 
-### Ingest (default: one source at a time, conversational)
+## Method files
 
-1. Read the new file in `raw/`. If it has inline image references (from Obsidian Web Clipper), read the text first, then view the images that matter (see Image handling below).
-2. Discuss the key takeaways with the user before writing anything — confirm what's actually worth capturing.
-3. Write a `wiki/sources/<slug>.md` summary page: what the source claims, key findings/numbers, how it relates to temporal action quantization specifically.
-4. Update or create the relevant `wiki/concepts/` and `wiki/entities/` pages — this is usually the bulk of the work. A single source may touch 5-10 pages. Flag explicitly when a new source contradicts or supersedes an existing claim (don't silently overwrite).
-5. Update `wiki/synthesis/` pages if the source changes the overall picture or opens a new open question.
-6. Update `wiki/index.md` with the new/changed pages.
-7. Append an entry to `wiki/log.md`.
+4 fixed files under `wiki/en/methods/`: `action-quantization.md`, `dataset-labeling.md`, `module-training.md`, `label-module-architecture.md`. Each follows: **Current Approach / Alternatives Considered / Open Sub-problems / Experiment Log (dated, chronological) / Decision Status** (`exploring` | `decided` | `implemented`).
 
-### Query
+Two standing open sub-problems must always be kept current (`agents/method-designer.md`):
+1. **Statistical reliability of single-rollout success estimates** — lives in `action-quantization.md`.
+2. **Generalization of quantization-safety labels to nearby state-space regions** (credit assignment / compositionality) — lives in `label-module-architecture.md`.
 
-1. Read `wiki/index.md` first to find candidate pages.
-2. Drill into the relevant `concepts/`, `entities/`, and `sources/` pages.
-3. Synthesize an answer with citations back to source pages.
-4. If the answer is substantial (a comparison, a synthesis, a new connection), offer to file it back into `wiki/synthesis/` as a new page rather than letting it disappear into chat history.
-5. Append a short entry to `wiki/log.md` for non-trivial queries.
+## Extend-don't-modify boundary
 
-### Lint (run when asked, or proactively suggest after ~5-10 ingests)
+GR00T N1.5, RoboCasa-Kitchen, and LIBERO are referenced and documented only. No agent or workflow in this repo edits those codebases — decisions/experiments about them are recorded here as documentation; actual code changes happen in those projects' own repos.
 
-Check for: contradictions between pages, claims superseded by newer sources, orphan pages, concepts mentioned in passing but lacking their own page, missing cross-references, and gaps that a targeted web search could fill. Propose findings before making changes.
+## Korean twin wiki rules
 
-## Image handling
+Everything under `wiki/en/` gets mirrored 1:1 into `wiki/ko/` as a **faithful translation, not a summary** (`agents/korean-sync.md`). Every md file's frontmatter carries `twin: <relative-path>` linking en<->ko and `last_synced: <date>`. Notation symbols and proper nouns (θ, κ, p, D\*, m/L, q, GR00T, RoboCasa, ATQ, ...) stay untranslated per `wiki/en/glossary.md` — the shared source of truth `korean-sync` must consult before translating anything.
 
-Sources may include inline images (architecture diagrams, tokenization schemes, results tables as figures). Obsidian Web Clipper downloads these to `raw/assets/`. You can't read markdown-with-inline-images in one pass — read the source text first, then separately view images that are load-bearing for understanding (architecture figures, key result charts). Don't bother viewing purely decorative images.
+**Session Handoff mechanism:** `data-collector`/`contribution-analyst`/`method-designer` append one line each (if they touched anything) to a `## Session Handoff` heading at the top of `wiki/en/research-directions.md`, format `- [agent-name] touched: <file path>`. **These three agents must run strictly sequentially, never in parallel** — they share this one mutable heading, and concurrent read-modify-write would silently lose a line. `korean-sync` consumes the heading, mirrors every listed file, then deletes the heading — it must never survive into a commit.
 
-## Log format
+**Fast-path clause:** if no `wiki/en/*` file changed this session, `korean-sync` is a no-op and must say so plainly — the mandatory-every-session rule exists to prevent drift, not to force translation work when there's nothing to translate.
 
-Each entry starts with a consistent prefix so it's greppable (`grep "^## \[" wiki/log.md | tail -5`):
+**Durable Sync Log:** distinct from the ephemeral Session Handoff heading, `korean-sync` always appends one dated line to a durable `## Sync Log` section at the bottom of `research-directions.md` (both en and ko), every run including no-op ones — `synced N file(s)` or `no-op, no en changes`. This is what makes a legitimately-idle run distinguishable from a silently-skipped one in git history; a gap in the dated sequence is the detectable signature of a skipped session.
 
-```
-## [YYYY-MM-DD] ingest | <Source Title>
-- pages touched: ...
-- key takeaway: ...
+## Tag taxonomy governance
 
-## [YYYY-MM-DD] query | <short question>
-- filed to: wiki/synthesis/... (if applicable)
+New tags must be added to `wiki/en/tags.md` (mirrored to `wiki/ko/tags.md`) before use — no ad hoc tags in individual files. `data-collector` may add a tag under `(pending review)`; only `wiki-architect` confirms or rejects it, at end of session.
 
-## [YYYY-MM-DD] lint
-- findings: ...
-```
+## Agent roster
+
+5 fixed, reusable agents under `agents/`, invoked in this order every session:
+
+1. `agents/data-collector.md` — raw ingestion + verbatim conversion.
+2. `agents/contribution-analyst.md` — takeaway/pitfall extraction, research-directions.md updates.
+3. `agents/method-designer.md` — updates the 4 method files, manages Decision Status.
+4. `agents/korean-sync.md` — en->ko sync, drift detection, durable Sync Log entry. **Must run every session** (cheaply, via its no-op fast path, when nothing changed) — see the commit gate above.
+5. `agents/wiki-architect.md` — structure/tag/index consistency, resolves `(pending review)` tags, decides if new nodes are needed. Runs last.
+
+Agents 1-3 must run strictly sequentially, never in parallel (see Session Handoff mechanism above).
+
+## Structural change gate
+
+After this initial bootstrap, only `agents/wiki-architect.md`'s agent may add/rename top-level directories, fixed method files, or tag categories. Everyone else works within the existing structure.
